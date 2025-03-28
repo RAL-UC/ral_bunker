@@ -16,6 +16,7 @@ find_package(nav_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 
 add_executable(pid_controller src/pid_controller.cpp)
+add_executable(path_planner src/path_planner.cpp)
 
 ament_target_dependencies(
   pid_controller 
@@ -25,8 +26,16 @@ ament_target_dependencies(
   tf2
   )
 
+ament_target_dependencies(path_planner
+  rclcpp 
+  geometry_msgs
+  nav_msgs
+  tf2
+)
+
 install(TARGETS
   pid_controller
+  path_planner
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)

@@ -6,7 +6,6 @@ Package for running Vectornav VN-200S sensor with ROS2
 This package contains multiple codes for extracting data from VN-200S sensor.
 
 
-
 ### Hardware (optional)
 list of dependencies: (delet this line at the end)
 * Vectornav VN200-S
