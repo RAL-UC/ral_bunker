@@ -18,17 +18,18 @@ class BaseControllerNode : public rclcpp::Node
 {
 public:
   BaseControllerNode()
-  : Node("base_controller_node")
+  : Node("pid_controller_curvature")
   {
     twist_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
     // Publisher for Pose2D messages (similar to your ROS1 logic)
     pose_pub_ = this->create_publisher<geometry_msgs::msg::Pose2D>("pose2d", 10);
 
+    // Real bunker:
     odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
       "/odometry/filtered/local", 10,
       std::bind(&BaseControllerNode::odom_callback, this, std::placeholders::_1));
 
-
+    // Simulation topic:
     // odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
     //   "/odometry/local", 10,
     //   std::bind(&BaseControllerNode::odom_callback, this, std::placeholders::_1));

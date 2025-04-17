@@ -15,11 +15,11 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 
-add_executable(pid_controller src/pid_controller.cpp)
+add_executable(pid_controller_curvature src/pid_controller_curvature.cpp)
 add_executable(path_planner src/path_planner.cpp)
+add_executable(pid_controller_square src/pid_controller_square.cpp)
 
-ament_target_dependencies(
-  pid_controller 
+ament_target_dependencies(pid_controller_curvature 
   rclcpp 
   geometry_msgs
   nav_msgs
@@ -33,8 +33,16 @@ ament_target_dependencies(path_planner
   tf2
 )
 
+ament_target_dependencies(pid_controller_square
+  rclcpp 
+  geometry_msgs
+  nav_msgs
+  tf2
+)
+
 install(TARGETS
-  pid_controller
+  pid_controller_curvature
+  pid_controller_square
   path_planner
   DESTINATION lib/${PROJECT_NAME})
 

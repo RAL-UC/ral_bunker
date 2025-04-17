@@ -102,6 +102,54 @@ private:
     return path_msg;
   }
 
+  // Function to create a square path
+  nav_msgs::msg::Path createSquarePath()
+  {
+    nav_msgs::msg::Path path_msg;
+    path_msg.header.stamp = this->get_clock()->now();
+    path_msg.header.frame_id = "odom";
+
+    std::vector<geometry_msgs::msg::PoseStamped> poses;
+    // Define square side length and corners (return to start)
+    double side = 2.0;
+    std::vector<std::pair<double, double>> corners = {
+      {0.0, 0.0},
+      {side, 0.0},
+      {side, side},
+      {0.0, side},
+      {0.0, 0.0}
+    };
+    // Create poses for each corner
+    for (size_t i = 0; i < corners.size(); ++i)
+    {
+      geometry_msgs::msg::PoseStamped pose;
+      pose.header.stamp = this->get_clock()->now();
+      pose.header.frame_id = "odom";
+
+      // Current corner
+      double x = corners[i].first;
+      double y = corners[i].second;
+      pose.pose.position.x = x;
+      pose.pose.position.y = y;
+      pose.pose.position.z = 0.0;
+
+      // Compute heading toward next corner
+      size_t next = (i + 1) % corners.size();
+      double dx = corners[next].first - x;
+      double dy = corners[next].second - y;
+      double heading = std::atan2(dy, dx);
+
+      pose.pose.orientation.x = 0.0;
+      pose.pose.orientation.y = 0.0;
+      pose.pose.orientation.z = std::sin(heading / 2.0);
+      pose.pose.orientation.w = std::cos(heading / 2.0);
+
+      poses.push_back(pose);
+    }
+    path_msg.poses = poses;
+    return path_msg;
+  }
+
   // Publish the path based on the "path_type" parameter
   void publish_path()
   {
@@ -120,9 +168,15 @@ private:
       RCLCPP_INFO(this->get_logger(), "Publishing snake path");
       path_msg = createSnakePath();
     }
+    else if (path_type == "square")
+    {
+      RCLCPP_INFO(this->get_logger(), "Publishing square path");
+      path_msg = createSquarePath();
+    }
     else
     {
-      RCLCPP_WARN(this->get_logger(), "Unknown path_type parameter: '%s'. Defaulting to straight line", path_type.c_str());
+      RCLCPP_WARN(this->get_logger(),
+        "Unknown path_type parameter: '%s'. Defaulting to straight line", path_type.c_str());
       path_msg = createStraightLinePath();
     }
 
@@ -143,7 +197,7 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<PathPublisherNode>();
-  rclcpp::spin(node);
+    rclcpp::spin(node);
   rclcpp::shutdown();
   return 0;
 }
