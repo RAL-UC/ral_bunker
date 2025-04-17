@@ -6,6 +6,7 @@
 #include <algorithm>  // for std::min, std::max
 
 #include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/bool.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "geometry_msgs/msg/pose2_d.hpp"
 #include "nav_msgs/msg/odometry.hpp"
@@ -17,6 +18,7 @@
 using namespace std::chrono_literals;
 
 // Simple two-stage controller: ROTATE in place, then DRIVE with heading correction
+// Wait at each waypoint until a /allow Bool message is true
 enum class Stage { ROTATE, DRIVE };
 
 class BaseControllerNode : public rclcpp::Node 
@@ -28,19 +30,22 @@ public:
     twist_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
     pose_pub_  = this->create_publisher<geometry_msgs::msg::Pose2D>("pose2d", 10);
 
-    // odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-    //   "/odometry/local", 10,
-    //   std::bind(&BaseControllerNode::odom_callback, this, std::placeholders::_1));
-
     odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
       "/odometry/filtered/local", 10,
       std::bind(&BaseControllerNode::odom_callback, this, std::placeholders::_1));
 
+    // odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+    //   "/odometry/local", 10,
+    //   std::bind(&BaseControllerNode::odom_callback, this, std::placeholders::_1)); 
 
     auto qos = rclcpp::QoS(10).transient_local();
     path_sub_ = this->create_subscription<nav_msgs::msg::Path>(
       "/plan", qos,
       std::bind(&BaseControllerNode::path_callback, this, std::placeholders::_1));
+
+    allow_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+      "/allow", 10,
+      std::bind(&BaseControllerNode::allow_callback, this, std::placeholders::_1));
 
     // Initialize control stage and gains/thresholds
     stage_ = Stage::ROTATE;
@@ -48,6 +53,8 @@ public:
     dist_thresh_    = 0.1;  // meters
     k_ang_ = 1.0;
     k_lin_ = 0.3;
+    waiting_for_allow_ = false;
+    allow_flag_ = false;
   }
 
 private:
@@ -56,6 +63,8 @@ private:
       path_ = msg->poses;
       current_waypoint_index_ = 0;
       stage_ = Stage::ROTATE;
+      waiting_for_allow_ = false;
+      allow_flag_ = false;
       RCLCPP_INFO(this->get_logger(), "Received path with %zu waypoints", path_.size());
       timer_ = this->create_wall_timer(
         100ms, std::bind(&BaseControllerNode::control_loop, this));
@@ -83,6 +92,13 @@ private:
     pose_pub_->publish(pose2d);
   }
 
+  void allow_callback(const std_msgs::msg::Bool::SharedPtr msg) {
+    allow_flag_ = msg->data;
+    if (allow_flag_) {
+      RCLCPP_INFO(this->get_logger(), "Received allow=true");
+    }
+  }
+
   void control_loop() {
     geometry_msgs::msg::Twist cmd;
 
@@ -102,7 +118,10 @@ private:
     double yaw_err = desired_yaw - current_theta_;
     yaw_err = std::atan2(std::sin(yaw_err), std::cos(yaw_err));  // wrap to [-π,π]
 
-    RCLCPP_INFO(this->get_logger(), "Dist Error: %.3f, Yaw Error: %.3f", dist_err, yaw_err);
+    RCLCPP_INFO(this->get_logger(), "Dist Err: %.3f, Yaw Err: %.3f, Stage: %s, Waiting: %s", 
+      dist_err, yaw_err,
+      (stage_==Stage::ROTATE?"ROTATE":"DRIVE"),
+      (waiting_for_allow_?"yes":"no"));
 
     if (stage_ == Stage::ROTATE) {
       // Rotate in place until aligned
@@ -114,16 +133,33 @@ private:
         stage_ = Stage::DRIVE;
       }
     } else {
-      // DRIVE stage: move forward *and* correct heading
-      if (dist_err > dist_thresh_) {
-        double v = k_lin_ * dist_err;
-        cmd.linear.x = std::max(0.0, std::min(v, 0.4));
-        double w = k_ang_ * yaw_err;
-        cmd.angular.z = std::max(-0.5, std::min(w, 0.5));
+      // DRIVE stage: move forward + heading correction, or wait at waypoint
+      if (!waiting_for_allow_) {
+        if (dist_err > dist_thresh_) {
+          // still approaching
+          double v = k_lin_ * dist_err;
+          cmd.linear.x = std::max(0.0, std::min(v, 0.4));
+          double w = k_ang_ * yaw_err;
+          cmd.angular.z = std::max(-0.5, std::min(w, 0.5));
+        } else {
+          // first arrival: stop and wait
+          cmd.linear.x = 0.0;
+          cmd.angular.z = 0.0;
+          waiting_for_allow_ = true;
+          RCLCPP_INFO(this->get_logger(), "Reached waypoint %zu, waiting for /allow=true", current_waypoint_index_);
+        }
       } else {
-        // Reached corner: advance to next and rotate
-        current_waypoint_index_++;
-        stage_ = Stage::ROTATE;
+        // waiting: only proceed once allow_flag_ is true
+        cmd.linear.x = 0.0;
+        cmd.angular.z = 0.0;
+        if (allow_flag_) {
+          // reset flags and move to next
+          allow_flag_ = false;
+          waiting_for_allow_ = false;
+          current_waypoint_index_++;
+          stage_ = Stage::ROTATE;
+          RCLCPP_INFO(this->get_logger(), "Proceeding to waypoint %zu", current_waypoint_index_);
+        }
       }
     }
 
@@ -134,6 +170,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::Pose2D>::SharedPtr pose_pub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr allow_sub_;
   rclcpp::TimerBase::SharedPtr timer_;
 
   std::vector<geometry_msgs::msg::PoseStamped> path_;
@@ -144,6 +181,9 @@ private:
   double dist_thresh_;
   double k_ang_;
   double k_lin_;
+
+  bool waiting_for_allow_;
+  bool allow_flag_;
 
   double current_x_ = 0.0;
   double current_y_ = 0.0;

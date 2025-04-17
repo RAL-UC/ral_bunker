@@ -40,6 +40,12 @@ ament_target_dependencies(pid_controller_square
   tf2
 )
 
+# Install launch files.
+install(DIRECTORY
+  launch
+  DESTINATION share/${PROJECT_NAME}/
+)
+
 install(TARGETS
   pid_controller_curvature
   pid_controller_square

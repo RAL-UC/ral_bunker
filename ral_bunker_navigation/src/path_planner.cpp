@@ -102,7 +102,7 @@ private:
     return path_msg;
   }
 
-  // Function to create a square path
+    // Function to create a square path
   nav_msgs::msg::Path createSquarePath()
   {
     nav_msgs::msg::Path path_msg;
@@ -110,45 +110,73 @@ private:
     path_msg.header.frame_id = "odom";
 
     std::vector<geometry_msgs::msg::PoseStamped> poses;
-    // Define square side length and corners (return to start)
     double side = 2.0;
+
     std::vector<std::pair<double, double>> corners = {
       {0.0, 0.0},
       {side, 0.0},
       {side, side},
       {0.0, side},
-      {0.0, 0.0}
+      {0.0, 0.0}  // Return to start
     };
-    // Create poses for each corner
-    for (size_t i = 0; i < corners.size(); ++i)
+
+    const int num_intermediate_points = 4;
+
+    for (size_t i = 0; i < corners.size() - 1; ++i)
     {
-      geometry_msgs::msg::PoseStamped pose;
-      pose.header.stamp = this->get_clock()->now();
-      pose.header.frame_id = "odom";
+      double x0 = corners[i].first;
+      double y0 = corners[i].second;
+      double x1 = corners[i + 1].first;
+      double y1 = corners[i + 1].second;
 
-      // Current corner
-      double x = corners[i].first;
-      double y = corners[i].second;
-      pose.pose.position.x = x;
-      pose.pose.position.y = y;
-      pose.pose.position.z = 0.0;
-
-      // Compute heading toward next corner
-      size_t next = (i + 1) % corners.size();
-      double dx = corners[next].first - x;
-      double dy = corners[next].second - y;
+      double dx = x1 - x0;
+      double dy = y1 - y0;
       double heading = std::atan2(dy, dx);
 
-      pose.pose.orientation.x = 0.0;
-      pose.pose.orientation.y = 0.0;
-      pose.pose.orientation.z = std::sin(heading / 2.0);
-      pose.pose.orientation.w = std::cos(heading / 2.0);
+      // Add intermediate points
+      for (int j = 0; j <= num_intermediate_points; ++j)
+      {
+        double t = static_cast<double>(j + 1) / static_cast<double>(num_intermediate_points + 1);
+        double x = x0 + t * dx;
+        double y = y0 + t * dy;
 
-      poses.push_back(pose);
+        geometry_msgs::msg::PoseStamped pose;
+        pose.header.stamp = this->get_clock()->now();
+        pose.header.frame_id = "odom";
+
+        pose.pose.position.x = x;
+        pose.pose.position.y = y;
+        pose.pose.position.z = 0.0;
+
+        pose.pose.orientation.x = 0.0;
+        pose.pose.orientation.y = 0.0;
+        pose.pose.orientation.z = std::sin(heading / 2.0);
+        pose.pose.orientation.w = std::cos(heading / 2.0);
+
+        poses.push_back(pose);
+      }
+
+      // Add actual corner point
+      geometry_msgs::msg::PoseStamped corner_pose;
+      corner_pose.header.stamp = this->get_clock()->now();
+      corner_pose.header.frame_id = "odom";
+
+      corner_pose.pose.position.x = x1;
+      corner_pose.pose.position.y = y1;
+      corner_pose.pose.position.z = 0.0;
+
+      corner_pose.pose.orientation.x = 0.0;
+      corner_pose.pose.orientation.y = 0.0;
+      corner_pose.pose.orientation.z = std::sin(heading / 2.0);
+      corner_pose.pose.orientation.w = std::cos(heading / 2.0);
+
+      poses.push_back(corner_pose);
     }
+
     path_msg.poses = poses;
     return path_msg;
   }
+
 
   // Publish the path based on the "path_type" parameter
   void publish_path()
