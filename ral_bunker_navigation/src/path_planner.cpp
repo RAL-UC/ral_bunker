@@ -103,6 +103,7 @@ private:
   }
 
     // Function to create a square path
+  // Function to create a closed square path (starts & ends at 0,0)
   nav_msgs::msg::Path createSquarePath()
   {
     nav_msgs::msg::Path path_msg;
@@ -111,72 +112,80 @@ private:
 
     std::vector<geometry_msgs::msg::PoseStamped> poses;
     double side = 2.0;
+    const int num_intermediate = 4;
 
-    std::vector<std::pair<double, double>> corners = {
+    // 1) Define the four unique corners
+    std::vector<std::pair<double,double>> corners = {
       {0.0, 0.0},
-      {side, 0.0},
-      {side, side},
-      {0.0, side},
-      {0.0, 0.0}  // Return to start
+      { side, 0.0},
+      { side,  side},
+      {0.0,  side}
     };
 
-    const int num_intermediate_points = 4;
+    // 2) Create and push the starting pose (at 0,0, heading=0)
+    geometry_msgs::msg::PoseStamped start_pose;
+    start_pose.header.frame_id = "odom";
+    start_pose.header.stamp = this->get_clock()->now();
+    start_pose.pose.position.x = 0.0;
+    start_pose.pose.position.y = 0.0;
+    start_pose.pose.position.z = 0.0;
+    // heading = 0 → quaternion = (0,0,0,1)
+    start_pose.pose.orientation.x = 0.0;
+    start_pose.pose.orientation.y = 0.0;
+    start_pose.pose.orientation.z = 0.0;
+    start_pose.pose.orientation.w = 1.0;
+    poses.push_back(start_pose);
 
-    for (size_t i = 0; i < corners.size() - 1; ++i)
+    // 3) Walk each edge, including intermediate points, and push the corner
+    for (size_t i = 0; i < corners.size(); ++i)
     {
-      double x0 = corners[i].first;
-      double y0 = corners[i].second;
-      double x1 = corners[i + 1].first;
-      double y1 = corners[i + 1].second;
+      // next corner index wraps around to 0
+      size_t j = (i + 1) % corners.size();
+      double x0 = corners[i].first,  y0 = corners[i].second;
+      double x1 = corners[j].first,  y1 = corners[j].second;
 
       double dx = x1 - x0;
       double dy = y1 - y0;
       double heading = std::atan2(dy, dx);
+      // build quaternion for this segment’s heading
+      double qz = std::sin(heading / 2.0);
+      double qw = std::cos(heading / 2.0);
 
-      // Add intermediate points
-      for (int j = 0; j <= num_intermediate_points; ++j)
+      // intermediate points (split edge into num_intermediate+1 segments)
+      for (int k = 1; k <= num_intermediate; ++k)
       {
-        double t = static_cast<double>(j + 1) / static_cast<double>(num_intermediate_points + 1);
-        double x = x0 + t * dx;
-        double y = y0 + t * dy;
-
-        geometry_msgs::msg::PoseStamped pose;
-        pose.header.stamp = this->get_clock()->now();
-        pose.header.frame_id = "odom";
-
-        pose.pose.position.x = x;
-        pose.pose.position.y = y;
-        pose.pose.position.z = 0.0;
-
-        pose.pose.orientation.x = 0.0;
-        pose.pose.orientation.y = 0.0;
-        pose.pose.orientation.z = std::sin(heading / 2.0);
-        pose.pose.orientation.w = std::cos(heading / 2.0);
-
-        poses.push_back(pose);
+        double t = double(k) / double(num_intermediate + 1);
+        geometry_msgs::msg::PoseStamped p;
+        p.header.frame_id = "odom";
+        p.header.stamp = this->get_clock()->now();
+        p.pose.position.x = x0 + t * dx;
+        p.pose.position.y = y0 + t * dy;
+        p.pose.position.z = 0.0;
+        p.pose.orientation.x = 0.0;
+        p.pose.orientation.y = 0.0;
+        p.pose.orientation.z = qz;
+        p.pose.orientation.w = qw;
+        poses.push_back(p);
       }
 
-      // Add actual corner point
+      // then push the actual corner
       geometry_msgs::msg::PoseStamped corner_pose;
-      corner_pose.header.stamp = this->get_clock()->now();
       corner_pose.header.frame_id = "odom";
-
+      corner_pose.header.stamp = this->get_clock()->now();
       corner_pose.pose.position.x = x1;
       corner_pose.pose.position.y = y1;
       corner_pose.pose.position.z = 0.0;
-
       corner_pose.pose.orientation.x = 0.0;
       corner_pose.pose.orientation.y = 0.0;
-      corner_pose.pose.orientation.z = std::sin(heading / 2.0);
-      corner_pose.pose.orientation.w = std::cos(heading / 2.0);
-
+      corner_pose.pose.orientation.z = qz;
+      corner_pose.pose.orientation.w = qw;
       poses.push_back(corner_pose);
     }
 
-    path_msg.poses = poses;
+    // The last corner pushed is back at (0,0), so path is closed.
+    path_msg.poses = std::move(poses);
     return path_msg;
   }
-
 
   // Publish the path based on the "path_type" parameter
   void publish_path()

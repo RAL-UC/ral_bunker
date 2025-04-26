@@ -39,11 +39,19 @@ def generate_launch_description():
             output='screen',
         )
     
+    wgs84_to_utm = Node(
+            package='ral_gps',
+            name='wgs84_to_utm',
+            executable='wgs84_to_utm',
+            output='screen'
+        )
+    
     return LaunchDescription([
         imu,
         gps_launch,
         bunker_controller,
         ekf_launch,
         path_planner,
-        pid_controller_square
+        pid_controller_square,
+        wgs84_to_utm
     ])
