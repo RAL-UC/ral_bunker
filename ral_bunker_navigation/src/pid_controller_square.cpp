@@ -49,8 +49,8 @@ public:
 
     // Initialize control stage and gains/thresholds
     stage_ = Stage::ROTATE;
-    heading_thresh_ = 0.1;  // radians (~5°)
-    dist_thresh_    = 0.1;  // meters
+    heading_thresh_ = 0.05;  // radians (~5°)
+    dist_thresh_    = 0.05;  // meters
     k_ang_ = 1.0;
     k_lin_ = 0.3;
     waiting_for_allow_ = false;
