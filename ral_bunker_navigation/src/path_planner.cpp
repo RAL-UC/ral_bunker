@@ -102,8 +102,6 @@ private:
     return path_msg;
   }
 
-    // Function to create a square path
-  // Function to create a closed square path (starts & ends at 0,0)
   nav_msgs::msg::Path createSquarePath()
   {
     nav_msgs::msg::Path path_msg;
@@ -111,8 +109,8 @@ private:
     path_msg.header.frame_id = "odom";
 
     std::vector<geometry_msgs::msg::PoseStamped> poses;
-    double side = 2.0;
-    const int num_intermediate = 4;
+    double side = 6.0;
+    const int num_intermediate = 3;
 
     // 1) Define the four unique corners
     std::vector<std::pair<double,double>> corners = {
@@ -183,11 +181,77 @@ private:
     }
 
     // The last corner pushed is back at (0,0), so path is closed.
+    poses.push_back(start_pose);
     path_msg.poses = std::move(poses);
     return path_msg;
   }
 
-  // Publish the path based on the "path_type" parameter
+  nav_msgs::msg::Path createRectanglePath()
+  {
+    nav_msgs::msg::Path path_msg;
+    path_msg.header.stamp = this->get_clock()->now();
+    path_msg.header.frame_id = "odom";
+
+    const double length = 6.0;        // X-extent
+    const double width  = 3.0;        // Y-extent
+    const int    pts_len = 5;
+    const int    pts_wid = 2;
+
+    std::vector<geometry_msgs::msg::PoseStamped> poses;
+
+    const std::vector<std::pair<double,double>> corners = {
+        {0.0,    0.0},
+        {length, 0.0},
+        {length, width},
+        {0.0,    width}
+    };
+
+    auto push_pose = [&](double x, double y, double heading)
+    {
+      geometry_msgs::msg::PoseStamped p;
+      p.header.stamp = this->get_clock()->now();
+      p.header.frame_id = "odom";
+      p.pose.position.x = x;
+      p.pose.position.y = y;
+      p.pose.position.z = 0.0;
+      p.pose.orientation.x = 0.0;
+      p.pose.orientation.y = 0.0;
+      p.pose.orientation.z = std::sin(heading/2.0);
+      p.pose.orientation.w = std::cos(heading/2.0);
+      poses.push_back(std::move(p));
+    };
+
+    push_pose(0.0, 0.0, 0.0);   // start pose
+
+    /*  walk edges, sprinkling intermediate points  */
+    for (size_t i = 0; i < corners.size(); ++i)
+    {
+      size_t j = (i + 1) % corners.size();
+      double x0 = corners[i].first,  y0 = corners[i].second;
+      double x1 = corners[j].first,  y1 = corners[j].second;
+
+      double dx = x1 - x0;
+      double dy = y1 - y0;
+      double heading = std::atan2(dy, dx);
+
+      /* choose how many intermediate points for this edge */
+      int n_int = (std::fabs(dx) > std::fabs(dy)) ? pts_len : pts_wid;
+
+      for (int k = 1; k <= n_int; ++k)
+      {
+        double t = static_cast<double>(k) / (n_int + 1);
+        push_pose(x0 + t*dx, y0 + t*dy, heading);
+      }
+
+      if (j != 0)   // avoid duplicating the start corner at the very end
+        push_pose(x1, y1, heading);
+    }
+
+    push_pose(0.0, 0.0, 0.0);   // close the loop
+    path_msg.poses = std::move(poses);
+    return path_msg;
+  }
+
   void publish_path()
   {
     // Retrieve the parameter value
@@ -209,6 +273,11 @@ private:
     {
       RCLCPP_INFO(this->get_logger(), "Publishing square path");
       path_msg = createSquarePath();
+    }
+    else if (path_type == "rectangle")
+    {
+      RCLCPP_INFO(this->get_logger(), "Publishing rectangle path");
+      path_msg = createRectanglePath();
     }
     else
     {

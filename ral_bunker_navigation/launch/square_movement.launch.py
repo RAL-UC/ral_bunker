@@ -15,7 +15,7 @@ def generate_launch_description():
     bunker_controller = IncludeLaunchDescription(PythonLaunchDescriptionSource(os.path.join(ral_bunker_controller_pkg, 'launch', 'bunker.launch.py')))
     ekf_launch = IncludeLaunchDescription(PythonLaunchDescriptionSource(os.path.join(ral_bunker_controller_pkg, 'launch', 'dual_ekf_navsat.launch.py')))
 
-    gps_launch = IncludeLaunchDescription(PythonLaunchDescriptionSource(os.path.join(nmea_navsat_pkg, 'launch', 'nmea_serial_driver.launch.py'))) 
+    gps_launch = IncludeLaunchDescription(PythonLaunchDescriptionSource(os.path.join(nmea_navsat_pkg, 'launch', 'nmea_tcpclient_driver.launch.py'))) 
 
     imu = Node(
             package='ral_bunker_vectornav',
@@ -29,7 +29,7 @@ def generate_launch_description():
             name='ral_bunker_navigation',
             executable='path_planner',
             output='screen',
-            parameters=[{'path_type': 'square'}]
+            parameters=[{'path_type': 'rectangle'}]
         )
 
     pid_controller_square = Node(
