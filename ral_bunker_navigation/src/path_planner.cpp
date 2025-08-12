@@ -192,10 +192,10 @@ private:
     path_msg.header.stamp = this->get_clock()->now();
     path_msg.header.frame_id = "odom";
 
-    const double length = 6.0;        // X-extent
-    const double width  = 3.0;        // Y-extent
-    const int    pts_len = 5;
-    const int    pts_wid = 2;
+    const double length = 4.5;        // X-extent
+    const double width  = 4.5;        // Y-extent
+    const int    pts_len = 4;
+    const int    pts_wid = 4;
 
     std::vector<geometry_msgs::msg::PoseStamped> poses;
 
