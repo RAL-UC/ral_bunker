@@ -11,11 +11,15 @@ def generate_launch_description():
 
     ral_bunker_controller_pkg = get_package_share_directory('ral_bunker_controller')
     nmea_navsat_pkg = get_package_share_directory('nmea_navsat_driver')
+    velodyne = get_package_share_directory('velodyne')
 
     bunker_controller = IncludeLaunchDescription(PythonLaunchDescriptionSource(os.path.join(ral_bunker_controller_pkg, 'launch', 'bunker.launch.py')))
     ekf_launch = IncludeLaunchDescription(PythonLaunchDescriptionSource(os.path.join(ral_bunker_controller_pkg, 'launch', 'dual_ekf_navsat.launch.py')))
 
     gps_launch = IncludeLaunchDescription(PythonLaunchDescriptionSource(os.path.join(nmea_navsat_pkg, 'launch', 'nmea_tcpclient_driver.launch.py'))) 
+
+    velodyne_launch = IncludeLaunchDescription(PythonLaunchDescriptionSource(os.path.join(velodyne, 'launch', 'velodyne-all-nodes-VLP16-launch.py')))
+    # I had to modify the source code ip, located in velodyne_driver/config/VLP16-velodyne_driver_node-params.yaml
 
     imu = Node(
             package='ral_bunker_vectornav',
@@ -53,5 +57,6 @@ def generate_launch_description():
         ekf_launch,
         path_planner,
         pid_controller_square,
-        wgs84_to_utm
+        wgs84_to_utm,
+        velodyne_launch
     ])
