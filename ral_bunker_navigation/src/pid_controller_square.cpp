@@ -17,7 +17,7 @@
 
 // Action client
 #include "rclcpp_action/rclcpp_action.hpp"
-#include "radar_msg/action/next_pose.hpp"
+#include "ral_bunker_msgs/action/next_pose.hpp"
 
 using namespace std::chrono_literals;
 
@@ -28,7 +28,7 @@ enum class Stage { ROTATE, DRIVE };
 class BaseControllerNode : public rclcpp::Node 
 {
 public:
-  using NextPoseAction = radar_msg::action::NextPose;
+  using NextPoseAction = ral_bunker_msgs::action::NextPose;
   using GoalHandleNextPose = rclcpp_action::ServerGoalHandle<NextPoseAction>;
 
   BaseControllerNode()
@@ -37,10 +37,12 @@ public:
     twist_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
     pose_pub_  = this->create_publisher<geometry_msgs::msg::Pose2D>("pose2d", 10);
 
+    // REAL BUNKER: Subscribe to filtered odometry
     // odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
     //   "/odometry/filtered/local", 10,
     //   std::bind(&BaseControllerNode::odom_callback, this, std::placeholders::_1));
 
+    // SIMULATOR: Subscribe to local odometry
     odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
       "/odometry/local", 10,
       std::bind(&BaseControllerNode::odom_callback, this, std::placeholders::_1)); 
