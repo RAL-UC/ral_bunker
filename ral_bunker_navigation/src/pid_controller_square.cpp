@@ -72,6 +72,7 @@ private:
   rclcpp_action::Server<NextPoseAction>::SharedPtr action_server_;
   std::shared_ptr<GoalHandleNextPose> current_goal_handle_;
   bool executing_action_;
+  std::thread execution_thread_;  // Add this to track the execution thread
 
   rclcpp_action::GoalResponse handle_goal(
     const rclcpp_action::GoalUUID & uuid,
@@ -93,7 +94,8 @@ private:
   void handle_accepted(const std::shared_ptr<GoalHandleNextPose> goal_handle)
   {
     // This needs to return quickly to avoid blocking the executor, so spin up a new thread
-    std::thread{std::bind(&BaseControllerNode::execute, this, std::placeholders::_1), goal_handle}.detach();
+    execution_thread_ = std::thread{std::bind(&BaseControllerNode::execute, this, std::placeholders::_1), goal_handle};
+    execution_thread_.detach();
   }
 
   void execute(const std::shared_ptr<GoalHandleNextPose> goal_handle)
@@ -110,37 +112,49 @@ private:
       RCLCPP_INFO(this->get_logger(), "Action goal received: proceeding to next waypoint");
     }
 
-    // Send feedback with distance to goal
-    auto feedback = std::make_shared<NextPoseAction::Feedback>();
+    // Main execution loop - keep running until action is complete
+    rclcpp::Rate loop_rate(10);  // 10 Hz feedback rate
     
-    // Calculate distance to goal
-    if (current_waypoint_index_ < path_.size()) {
-      auto &pt = path_[current_waypoint_index_].pose.position;
-      double dx = pt.x - current_x_;
-      double dy = pt.y - current_y_;
-      feedback->distance_to_goal = std::hypot(dx, dy);
-    } else {
-      feedback->distance_to_goal = 0.0;
-    }
-    
-    // Publish the feedback
-    goal_handle->publish_feedback(feedback);
+    while (rclcpp::ok() && executing_action_) {
+      // Check if there is a cancel request
+      if (goal_handle->is_canceling()) {
+        auto result = std::make_shared<NextPoseAction::Result>();
+        result->success = false;
+        goal_handle->canceled(result);
+        RCLCPP_INFO(this->get_logger(), "Goal canceled");
+        executing_action_ = false;
+        current_goal_handle_ = nullptr;
+        return;
+      }
 
-    // Create the result (only success status)
+      // Send feedback with distance to goal
+      auto feedback = std::make_shared<NextPoseAction::Feedback>();
+      
+      // Calculate distance to goal
+      if (current_waypoint_index_ < path_.size()) {
+        auto &pt = path_[current_waypoint_index_].pose.position;
+        double dx = pt.x - current_x_;
+        double dy = pt.y - current_y_;
+        feedback->distance_to_goal = std::hypot(dx, dy);
+      } else {
+        feedback->distance_to_goal = 0.0;
+      }
+      
+      // Publish the feedback
+      goal_handle->publish_feedback(feedback);
+      
+      // Sleep to maintain feedback rate
+      loop_rate.sleep();
+    }
+
+    // Action is complete - send final result
     auto result = std::make_shared<NextPoseAction::Result>();
     result->success = true;
-
-    // Check if there is a cancel request
-    if (goal_handle->is_canceling()) {
-      result->success = false;
-      goal_handle->canceled(result);
-      RCLCPP_INFO(this->get_logger(), "Goal canceled");
-      return;
-    }
-
-    // Set the result
     goal_handle->succeed(result);
-    RCLCPP_INFO(this->get_logger(), "Goal succeeded");
+    RCLCPP_INFO(this->get_logger(), "Goal succeeded - waypoint reached");
+    
+    // Clean up
+    current_goal_handle_ = nullptr;
   }
 
   void path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
@@ -189,6 +203,7 @@ private:
       // No more waypoints: stop and cancel
       twist_pub_->publish(cmd);
       timer_->cancel();
+      executing_action_ = false;  // Signal action completion
       return;
     }
 
@@ -232,13 +247,12 @@ private:
         double w = k_ang_ * yaw_err;
         cmd.angular.z = std::max(-0.5, std::min(w, 0.5));
       } else {
-        // first arrival: stop and wait for action
-        executing_action_ = false;
-        RCLCPP_INFO(this->get_logger(), "Reached waypoint %zu, waiting for action goal", current_waypoint_index_);
+        // Reached waypoint - action is complete
+        executing_action_ = false;  // This will signal the execute function to finish
+        RCLCPP_INFO(this->get_logger(), "Reached waypoint %zu, action complete", current_waypoint_index_);
 
         current_waypoint_index_++;
         stage_ = Stage::ROTATE;
-        current_goal_handle_ = nullptr;
       }
     }
 
