@@ -15,17 +15,22 @@
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/LinearMath/Matrix3x3.h"
 
+// Action client
+#include "rclcpp_action/rclcpp_action.hpp"
 #include "radar_msg/action/next_pose.hpp"
 
 using namespace std::chrono_literals;
 
 // Simple two-stage controller: ROTATE in place, then DRIVE with heading correction
-// Wait at each waypoint until a /allow Bool message is true
+// Wait at each waypoint until action goal is received
 enum class Stage { ROTATE, DRIVE };
 
 class BaseControllerNode : public rclcpp::Node 
 {
 public:
+  using NextPoseAction = radar_msg::action::NextPose;
+  using GoalHandleNextPose = rclcpp_action::ServerGoalHandle<NextPoseAction>;
+
   BaseControllerNode()
   : Node("pid_controller_square")
   {
@@ -45,9 +50,13 @@ public:
       "/plan", qos,
       std::bind(&BaseControllerNode::path_callback, this, std::placeholders::_1));
 
-    allow_sub_ = this->create_subscription<std_msgs::msg::Bool>(
-      "/allow", 10,
-      std::bind(&BaseControllerNode::allow_callback, this, std::placeholders::_1));
+    // Create action server
+    this->action_server_ = rclcpp_action::create_server<NextPoseAction>(
+      this,
+      "next_pose",
+      std::bind(&BaseControllerNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+      std::bind(&BaseControllerNode::handle_cancel, this, std::placeholders::_1),
+      std::bind(&BaseControllerNode::handle_accepted, this, std::placeholders::_1));
 
     // Initialize control stage and gains/thresholds
     stage_ = Stage::ROTATE;
@@ -55,18 +64,92 @@ public:
     dist_thresh_    = 0.02;  // meters
     k_ang_ = 1.0;
     k_lin_ = 0.4;
-    waiting_for_allow_ = false;
-    allow_flag_ = false;
+    waiting_for_action_ = false;
+    current_goal_handle_ = nullptr;
   }
 
 private:
+  rclcpp_action::Server<NextPoseAction>::SharedPtr action_server_;
+  std::shared_ptr<GoalHandleNextPose> current_goal_handle_;
+  bool waiting_for_action_;
+
+  rclcpp_action::GoalResponse handle_goal(
+    const rclcpp_action::GoalUUID & uuid,
+    std::shared_ptr<const NextPoseAction::Goal> goal)
+  {
+    RCLCPP_INFO(this->get_logger(), "Received goal request with go_to_next_pose = %s", 
+                goal->go_to_next_pose ? "true" : "false");
+    (void)uuid;
+    return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+  }
+
+  rclcpp_action::CancelResponse handle_cancel(
+    const std::shared_ptr<GoalHandleNextPose> goal_handle)
+  {
+    RCLCPP_INFO(this->get_logger(), "Received request to cancel goal");
+    (void)goal_handle;
+    return rclcpp_action::CancelResponse::ACCEPT;
+  }
+
+  void handle_accepted(const std::shared_ptr<GoalHandleNextPose> goal_handle)
+  {
+    // This needs to return quickly to avoid blocking the executor, so spin up a new thread
+    std::thread{std::bind(&BaseControllerNode::execute, this, std::placeholders::_1), goal_handle}.detach();
+  }
+
+  void execute(const std::shared_ptr<GoalHandleNextPose> goal_handle)
+  {
+    RCLCPP_INFO(this->get_logger(), "Executing goal");
+    
+    // Store the goal handle for the control loop to use
+    current_goal_handle_ = goal_handle;
+    
+    // If the goal is to go to next pose, set the flag
+    if (goal_handle->get_goal()->go_to_next_pose) {
+      waiting_for_action_ = false;  // Allow proceeding to next waypoint
+      RCLCPP_INFO(this->get_logger(), "Action goal received: proceeding to next waypoint");
+    }
+
+    // Send feedback with distance to goal
+    auto feedback = std::make_shared<NextPoseAction::Feedback>();
+    
+    // Calculate distance to goal
+    if (current_waypoint_index_ < path_.size()) {
+      auto &pt = path_[current_waypoint_index_].pose.position;
+      double dx = pt.x - current_x_;
+      double dy = pt.y - current_y_;
+      feedback->distance_to_goal = std::hypot(dx, dy);
+    } else {
+      feedback->distance_to_goal = 0.0;
+    }
+    
+    // Publish the feedback
+    goal_handle->publish_feedback(feedback);
+
+    // Create the result (only success status)
+    auto result = std::make_shared<NextPoseAction::Result>();
+    result->success = true;
+
+    // Check if there is a cancel request
+    if (goal_handle->is_canceling()) {
+      result->success = false;
+      goal_handle->canceled(result);
+      RCLCPP_INFO(this->get_logger(), "Goal canceled");
+      return;
+    }
+
+    // Set the result
+    goal_handle->succeed(result);
+    RCLCPP_INFO(this->get_logger(), "Goal succeeded");
+  }
+
   void path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
     if (!msg->poses.empty()) {
       path_ = msg->poses;
       current_waypoint_index_ = 0;
       stage_ = Stage::ROTATE;
-      waiting_for_allow_ = false;
-      allow_flag_ = false;
+      waiting_for_action_ = false;
+      current_goal_handle_ = nullptr;
       RCLCPP_INFO(this->get_logger(), "Received path with %zu waypoints", path_.size());
       timer_ = this->create_wall_timer(
         100ms, std::bind(&BaseControllerNode::control_loop, this));
@@ -94,13 +177,6 @@ private:
     pose_pub_->publish(pose2d);
   }
 
-  void allow_callback(const std_msgs::msg::Bool::SharedPtr msg) {
-    allow_flag_ = msg->data;
-    if (allow_flag_) {
-      RCLCPP_INFO(this->get_logger(), "Received allow=true");
-    }
-  }
-
   void control_loop() {
     geometry_msgs::msg::Twist cmd;
 
@@ -123,7 +199,7 @@ private:
     RCLCPP_INFO(this->get_logger(), "Dist Err: %.3f, Yaw Err: %.3f, Stage: %s, Waiting: %s", 
       dist_err, yaw_err,
       (stage_==Stage::ROTATE?"ROTATE":"DRIVE"),
-      (waiting_for_allow_?"yes":"no"));
+      (waiting_for_action_?"yes":"no"));
 
     if (stage_ == Stage::ROTATE) {
       // Rotate in place until aligned
@@ -136,7 +212,7 @@ private:
       }
     } else {
       // DRIVE stage: move forward + heading correction, or wait at waypoint
-      if (!waiting_for_allow_) {
+      if (!waiting_for_action_) {
         if (dist_err > dist_thresh_) {
           // still approaching
           double v = k_lin_ * dist_err;
@@ -144,22 +220,22 @@ private:
           double w = k_ang_ * yaw_err;
           cmd.angular.z = std::max(-0.5, std::min(w, 0.5));
         } else {
-          // first arrival: stop and wait
+          // first arrival: stop and wait for action
           cmd.linear.x = 0.0;
           cmd.angular.z = 0.0;
-          waiting_for_allow_ = true;
-          RCLCPP_INFO(this->get_logger(), "Reached waypoint %zu, waiting for /allow=true", current_waypoint_index_);
+          waiting_for_action_ = true;
+          RCLCPP_INFO(this->get_logger(), "Reached waypoint %zu, waiting for action goal", current_waypoint_index_);
         }
       } else {
-        // waiting: only proceed once allow_flag_ is true
+        // waiting: only proceed once action goal is received
         cmd.linear.x = 0.0;
         cmd.angular.z = 0.0;
-        if (allow_flag_) {
+        if (!waiting_for_action_) {
           // reset flags and move to next
-          allow_flag_ = false;
-          waiting_for_allow_ = false;
+          waiting_for_action_ = false;
           current_waypoint_index_++;
           stage_ = Stage::ROTATE;
+          current_goal_handle_ = nullptr;  // Clear the goal handle
           RCLCPP_INFO(this->get_logger(), "Proceeding to waypoint %zu", current_waypoint_index_);
         }
       }
@@ -172,7 +248,6 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::Pose2D>::SharedPtr pose_pub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
-  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr allow_sub_;
   rclcpp::TimerBase::SharedPtr timer_;
 
   std::vector<geometry_msgs::msg::PoseStamped> path_;
@@ -183,9 +258,6 @@ private:
   double dist_thresh_;
   double k_ang_;
   double k_lin_;
-
-  bool waiting_for_allow_;
-  bool allow_flag_;
 
   double current_x_ = 0.0;
   double current_y_ = 0.0;
