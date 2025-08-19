@@ -37,13 +37,13 @@ public:
     twist_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
     pose_pub_  = this->create_publisher<geometry_msgs::msg::Pose2D>("pose2d", 10);
 
-    odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-      "/odometry/filtered/local", 10,
-      std::bind(&BaseControllerNode::odom_callback, this, std::placeholders::_1));
-
     // odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-    //   "/odometry/local", 10,
-    //   std::bind(&BaseControllerNode::odom_callback, this, std::placeholders::_1)); 
+    //   "/odometry/filtered/local", 10,
+    //   std::bind(&BaseControllerNode::odom_callback, this, std::placeholders::_1));
+
+    odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+      "/odometry/local", 10,
+      std::bind(&BaseControllerNode::odom_callback, this, std::placeholders::_1)); 
 
     auto qos = rclcpp::QoS(10).transient_local();
     path_sub_ = this->create_subscription<nav_msgs::msg::Path>(
@@ -64,21 +64,20 @@ public:
     dist_thresh_    = 0.02;  // meters
     k_ang_ = 1.0;
     k_lin_ = 0.4;
-    waiting_for_action_ = false;
+    executing_action_ = false;
     current_goal_handle_ = nullptr;
   }
 
 private:
   rclcpp_action::Server<NextPoseAction>::SharedPtr action_server_;
   std::shared_ptr<GoalHandleNextPose> current_goal_handle_;
-  bool waiting_for_action_;
+  bool executing_action_;
 
   rclcpp_action::GoalResponse handle_goal(
     const rclcpp_action::GoalUUID & uuid,
     std::shared_ptr<const NextPoseAction::Goal> goal)
   {
-    RCLCPP_INFO(this->get_logger(), "Received goal request with go_to_next_pose = %s", 
-                goal->go_to_next_pose ? "true" : "false");
+    RCLCPP_INFO(this->get_logger(), "Received goal request with go_to_next_pose = %s", goal->go_to_next_pose ? "true" : "false");
     (void)uuid;
     return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
   }
@@ -106,7 +105,8 @@ private:
     
     // If the goal is to go to next pose, set the flag
     if (goal_handle->get_goal()->go_to_next_pose) {
-      waiting_for_action_ = false;  // Allow proceeding to next waypoint
+      executing_action_ = true;  // Allow proceeding to next waypoint
+      stage_ = Stage::ROTATE; // Start with rotation
       RCLCPP_INFO(this->get_logger(), "Action goal received: proceeding to next waypoint");
     }
 
@@ -146,17 +146,22 @@ private:
   void path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
     if (!msg->poses.empty()) {
       path_ = msg->poses;
-      current_waypoint_index_ = 0;
-      stage_ = Stage::ROTATE;
-      waiting_for_action_ = false;
-      current_goal_handle_ = nullptr;
+      current_waypoint_index_ = 1;
       RCLCPP_INFO(this->get_logger(), "Received path with %zu waypoints", path_.size());
+      RCLCPP_INFO(this->get_logger(), "Path points:");
+      for (size_t i = 0; i < path_.size(); ++i) {
+        const auto &pose = path_[i].pose.position;
+        const auto &orientation = path_[i].pose.orientation;
+        RCLCPP_INFO(this->get_logger(), "  Waypoint %zu: (%.3f, %.3f, %.3f)", i, pose.x, pose.y, orientation.z);
+      }
+      // Start the control loop timer
       timer_ = this->create_wall_timer(
         100ms, std::bind(&BaseControllerNode::control_loop, this));
     }
   }
 
   void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
+    RCLCPP_INFO(this->get_logger(), "Received odometry update");
     current_x_ = msg->pose.pose.position.x;
     current_y_ = msg->pose.pose.position.y;
 
@@ -196,10 +201,18 @@ private:
     double yaw_err = desired_yaw - current_theta_;
     yaw_err = std::atan2(std::sin(yaw_err), std::cos(yaw_err));  // wrap to [-π,π]
 
-    RCLCPP_INFO(this->get_logger(), "Dist Err: %.3f, Yaw Err: %.3f, Stage: %s, Waiting: %s", 
+    RCLCPP_INFO(this->get_logger(), "Dist Err: %.3f, Yaw Err: %.3f, Stage: %s, Executing action: %s", 
       dist_err, yaw_err,
       (stage_==Stage::ROTATE?"ROTATE":"DRIVE"),
-      (waiting_for_action_?"yes":"no"));
+      (executing_action_?"yes":"no"));
+
+    if (!executing_action_) {
+      // If not executing an action, just wait in place
+      cmd.linear.x = 0.0;
+      cmd.angular.z = 0.0;
+      twist_pub_->publish(cmd);
+      return;
+    }
 
     if (stage_ == Stage::ROTATE) {
       // Rotate in place until aligned
@@ -212,32 +225,20 @@ private:
       }
     } else {
       // DRIVE stage: move forward + heading correction, or wait at waypoint
-      if (!waiting_for_action_) {
-        if (dist_err > dist_thresh_) {
-          // still approaching
-          double v = k_lin_ * dist_err;
-          cmd.linear.x = std::max(0.0, std::min(v, 0.4));
-          double w = k_ang_ * yaw_err;
-          cmd.angular.z = std::max(-0.5, std::min(w, 0.5));
-        } else {
-          // first arrival: stop and wait for action
-          cmd.linear.x = 0.0;
-          cmd.angular.z = 0.0;
-          waiting_for_action_ = true;
-          RCLCPP_INFO(this->get_logger(), "Reached waypoint %zu, waiting for action goal", current_waypoint_index_);
-        }
+      if (dist_err > dist_thresh_) {
+        // still approaching
+        double v = k_lin_ * dist_err;
+        cmd.linear.x = std::max(0.0, std::min(v, 0.4));
+        double w = k_ang_ * yaw_err;
+        cmd.angular.z = std::max(-0.5, std::min(w, 0.5));
       } else {
-        // waiting: only proceed once action goal is received
-        cmd.linear.x = 0.0;
-        cmd.angular.z = 0.0;
-        if (!waiting_for_action_) {
-          // reset flags and move to next
-          waiting_for_action_ = false;
-          current_waypoint_index_++;
-          stage_ = Stage::ROTATE;
-          current_goal_handle_ = nullptr;  // Clear the goal handle
-          RCLCPP_INFO(this->get_logger(), "Proceeding to waypoint %zu", current_waypoint_index_);
-        }
+        // first arrival: stop and wait for action
+        executing_action_ = false;
+        RCLCPP_INFO(this->get_logger(), "Reached waypoint %zu, waiting for action goal", current_waypoint_index_);
+
+        current_waypoint_index_++;
+        stage_ = Stage::ROTATE;
+        current_goal_handle_ = nullptr;
       }
     }
 
