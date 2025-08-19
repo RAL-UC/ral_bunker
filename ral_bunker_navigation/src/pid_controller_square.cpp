@@ -15,6 +15,8 @@
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/LinearMath/Matrix3x3.h"
 
+#include "radar_msg/action/next_pose.hpp"
+
 using namespace std::chrono_literals;
 
 // Simple two-stage controller: ROTATE in place, then DRIVE with heading correction
