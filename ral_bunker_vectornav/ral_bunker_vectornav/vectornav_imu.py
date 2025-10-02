@@ -28,7 +28,7 @@ class Vectornav(Node):
         msg = Imu()
 
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = 'base_link'
+        msg.header.frame_id = 'imu_link'
 
         quaternion = tf_transformations.quaternion_from_euler(roll, pitch, yaw)
         msg.orientation.x = quaternion[0]
