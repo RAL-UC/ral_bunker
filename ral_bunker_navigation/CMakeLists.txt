@@ -15,7 +15,7 @@ find_package(rclcpp_action REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(tf2 REQUIRED)
-find_package(radar_msg REQUIRED)
+find_package(ral_bunker_msgs REQUIRED)
 
 add_executable(pid_controller_curvature src/pid_controller_curvature.cpp)
 add_executable(path_planner src/path_planner.cpp)
@@ -41,7 +41,7 @@ ament_target_dependencies(pid_controller_square
   geometry_msgs
   nav_msgs
   tf2
-  radar_msg
+  ral_bunker_msgs
 )
 
 # Install launch files.
