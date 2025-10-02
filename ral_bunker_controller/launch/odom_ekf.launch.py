@@ -1,4 +1,3 @@
-
 # Copyright 2018 Open Source Robotics Foundation, Inc.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,8 +19,8 @@ import launch.actions
 
 
 def generate_launch_description():
-    ral_bunker_dir = get_package_share_directory("ral_bunker_controller")
-    rl_params_file = os.path.join(ral_bunker_dir, "config", "dual_ekf_navsat_params.yaml")
+    ral_bunker_controller_path = os.path.join(get_package_share_directory('ral_bunker_controller'))
+    rl_params_file = os.path.join(ral_bunker_controller_path, "config", "dual_ekf_navsat_params.yaml")
 
     return LaunchDescription(
         [
@@ -31,6 +30,7 @@ def generate_launch_description():
             launch.actions.DeclareLaunchArgument(
                 "output_location", default_value="~/dual_ekf_navsat_example_debug.txt"
             ),
+            # This only uses the ekf_filter_node_odom params in dual_ekf_navsat_params.yaml
             launch_ros.actions.Node(
                 package="robot_localization",
                 executable="ekf_node",
@@ -38,28 +38,6 @@ def generate_launch_description():
                 output="screen",
                 parameters=[rl_params_file, {"use_sim_time": False}],
                 remappings=[("odometry/filtered", "odometry/filtered/local")],
-            ),
-            # launch_ros.actions.Node(
-            #     package="robot_localization",
-            #     executable="ekf_node",
-            #     name="ekf_filter_node_map",
-            #     output="screen",
-            #     parameters=[rl_params_file, {"use_sim_time": True}],
-            #     remappings=[("odometry/filtered", "odometry/global")],
-            # ),
-            # launch_ros.actions.Node(
-            #     package="robot_localization",
-            #     executable="navsat_transform_node",
-            #     name="navsat_transform",
-            #     output="screen",
-            #     parameters=[rl_params_file, {"use_sim_time": True}],
-            #     remappings=[
-            #         ("imu/data", "imu/data"),
-            #         ("gps/fix", "fix"),
-            #         ("gps/filtered", "gps/filtered"),
-            #         ("odometry/gps", "odometry/gps"),
-            #         ("odometry/filtered", "/odom"),
-            #     ],
-            # ),
+            )
         ]
     )
