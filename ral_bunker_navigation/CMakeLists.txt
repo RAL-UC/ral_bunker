@@ -48,6 +48,7 @@ ament_target_dependencies(pid_controller_square
 install(DIRECTORY
   launch
   config
+  maps
   DESTINATION share/${PROJECT_NAME}/
 )
 

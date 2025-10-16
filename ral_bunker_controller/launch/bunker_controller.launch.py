@@ -25,10 +25,7 @@ def generate_launch_description():
     ral_bunker_controller_path = get_package_share_directory('ral_bunker_controller')
     nmea_navsat_pkg = get_package_share_directory('nmea_navsat_driver')
 
-    # ssmm_gnc_rl_sim_path = os.path.join(get_package_share_directory('ssmm_gnc_rl_sim'))
-    # xacro_file = os.path.join(ssmm_gnc_rl_sim_path, 'urdf', 'bunker.urdf') # We use the same URDF from sim on purpose
-
-    xacro_file = os.path.join(ral_bunker_controller_path, 'urdf', 'bunker.urdf') # We use the same URDF from sim on purpose
+    xacro_file = os.path.join(ral_bunker_controller_path, 'urdf', 'bunker.urdf')
 
     doc = xacro.parse(open(xacro_file))
     xacro.process_doc(doc)
