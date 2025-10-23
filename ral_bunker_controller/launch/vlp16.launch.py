@@ -41,19 +41,18 @@ from launch_ros.descriptions import ComposableNode
 
 
 def generate_launch_description():
-    ral_bunker_controller_path = ament_index_python.packages.get_package_share_directory('velodyne_driver')
+    ral_bunker_controller_path = ament_index_python.packages.get_package_share_directory('ral_bunker_controller')
     driver_params_file = os.path.join(ral_bunker_controller_path, 'config', 'VLP16-velodyne_driver_node-params.yaml')
     with open(driver_params_file, 'r') as f:
         driver_params = yaml.safe_load(f)['velodyne_driver_node']['ros__parameters']
 
     convert_share_dir = ament_index_python.packages.get_package_share_directory('velodyne_pointcloud')
-    convert_params_file = os.path.join(convert_share_dir, 'config', 'VLP16-velodyne_transform_node-params.yaml')
+    convert_params_file = os.path.join(ral_bunker_controller_path, 'config', 'VLP16-velodyne_transform_node-params.yaml')
     with open(convert_params_file, 'r') as f:
         convert_params = yaml.safe_load(f)['velodyne_transform_node']['ros__parameters']
     convert_params['calibration'] = os.path.join(convert_share_dir, 'params', 'VLP16db.yaml')
 
-    laserscan_share_dir = ament_index_python.packages.get_package_share_directory('velodyne_laserscan')
-    laserscan_params_file = os.path.join(laserscan_share_dir, 'config', 'default-velodyne_laserscan_node-params.yaml')
+    laserscan_params_file = os.path.join(ral_bunker_controller_path, 'config', 'VLP16-velodyne_laserscan_node-params.yaml')
     with open(laserscan_params_file, 'r') as f:
         laserscan_params = yaml.safe_load(f)['velodyne_laserscan_node']['ros__parameters']
 
