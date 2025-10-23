@@ -34,6 +34,15 @@ def generate_launch_description():
         }.items()
     )
 
+    rviz = Node(
+       package='rviz2',
+       executable='rviz2',
+       arguments=['-d', os.path.join(ral_bunker_navigation_path, 'rviz', 'cartographer.rviz')],
+       parameters=[{'use_sim_time': use_sim_time}]
+    )
+
+
     return LaunchDescription([
-        slam_toolbox_launch
+        slam_toolbox_launch,
+        rviz
     ])
