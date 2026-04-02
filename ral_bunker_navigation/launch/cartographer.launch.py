@@ -16,6 +16,13 @@ def generate_launch_description():
 
     # Setup project paths
     ral_bunker_navigation_path = os.path.join(get_package_share_directory('ral_bunker_navigation'))
+    ral_bunker_controller_path = get_package_share_directory('ral_bunker_controller')
+
+    bunker_controller_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(ral_bunker_controller_path, 'launch', 'bunker_controller.launch.py')
+        )
+    )
 
     # SLAM TOOLBOX
     slam_toolbox_config_path = os.path.join(ral_bunker_navigation_path, 'config', 'slam_toolbox.yaml')
@@ -43,6 +50,7 @@ def generate_launch_description():
 
 
     return LaunchDescription([
+        bunker_controller_launch,
         slam_toolbox_launch,
         rviz
     ])
