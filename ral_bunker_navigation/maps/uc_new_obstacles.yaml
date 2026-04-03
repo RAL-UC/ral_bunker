@@ -1,4 +1,4 @@
-image: uc_full.pgm
+image: uc_new_obstacles.pgm
 mode: trinary
 resolution: 0.05
 origin: [-18, -13, 0]
